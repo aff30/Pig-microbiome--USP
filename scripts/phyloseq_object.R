@@ -1,6 +1,6 @@
 ## Creating a phyloseq object
 
-# Emily - adapted by Ana 07/20/22
+# Ana 02/20/23
 
 # install (if necessary) and load packages
 require(tidyverse)
