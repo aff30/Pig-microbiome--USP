@@ -1,208 +1,131 @@
-# R script to run dada2 algorithm on trimmed paired-end reads
-## NORMAL error learning - for non-binned quality scores
+## Creating a phyloseq object
 
-# set the environment 
-setwd("/Users/anafonseca/Pig_vinny/fastp/forward_reads/")
+# Emily - adapted by Ana 07/20/22
 
-## ---- SET VARIABLES ----
-
-## modify these variables:
-
-# path to filtered and cleaned reads
-CLEANEDPATH = "/Users/anafonseca/Pig_vinny/fastp/forward_reads/"
-
-# path to output tables
-OUTPATH = "/Users/anafonseca/Pig_vinny/fastp/forward_reads/output"
-
-# database to silva training set
-# downloaded from: https://benjjneb.github.io/dada2/training.html
-DB = "/Users/anafonseca/Pig_vinny/silva_data/silva_nr99_v138.1_train_set.fa.gz"
-
-# paired end patterns 
-FILTEREDF = "_r1_fastp.fq"
-#FILTEREDR = "_r1_fastp.fq"
-
-# ---- install and read data ----
-
-### packages must be previously installed
-require(dada2)
-require(tidyr)
+# install (if necessary) and load packages
+require(tidyverse)
+#install phyloseq
+#if (!require("BiocManager", quietly = TRUE))
+#install.packages("BiocManager")
+#BiocManager::install("phyloseq")
 require(phyloseq)
-require(magrittr, warn.conflicts = FALSE)
-
-## test that pathway works
-#if(!list.files(CLEANEDPATH)) {
-#  cat("Can't read file pathway or files are not present")
-#}
-
-## ---- core dada algorithm ----
-
-# get forward and reverse reads
-forward <- sort(list.files(CLEANEDPATH, pattern = FILTEREDF, full.names = TRUE))
-#reverse <- sort(list.files(CLEANEDPATH, pattern = FILTEREDR, full.names = TRUE))
-
-# check to make sure that the lengths of both files are the same and that they match
-fwdNames <- sapply(strsplit(basename(forward), FILTEREDF), `[`, 1)
-#revNames <- sapply(strsplit(basename(reverse), FILTEREDR), `[`, 1)
-
-# error catch
-#if(length(fwdNames) != length(revNames)) {
-#  stop("The number of forward and reverse files do not match.")
-#} else {
-
-# if(any(!fwdNames%in% revNames)) {
-
-#   stop("Forward and reverse reads are out of order.")
-# }
-#}
-
-# learn errors for forward and reverse
-errF <- learnErrors(
-  forward,
-  multithread = TRUE,
-  verbose = TRUE
-)
-#errR <- learnErrors(
-#  reverse,
-# multithread = TRUE,
-# verbose = TRUE
-#)
-
-# save progress
-save.image(file = paste0(OUTPATH, "/error-learning.RData"))
-
-# plot forward errors
-pdf(paste0(OUTPATH, "/forward-errorplot.pdf"))
-plotErrors(errF, nominalQ = TRUE)
-dev.off()
-
-# plot reverse errors
-#pdf(paste0(OUTPATH, "/reverse-errorplot.pdf"))
-#plotErrors(errR, nominalQ = TRUE)
-#dev.off()
-
-#derep post-errors
-
-### packages must be previously installed
+#install DADA2
+#install.packages("devtools")
+library("devtools")
+#devtools::install_github("benjjneb/dada2", ref="v1.16")
 require(dada2)
-require(tidyr)
-require(phyloseq)
-require(magrittr)
+# install latest version of microViz
+#devtools::install_github("david-barnett/microViz@0.7.1")
+require(microViz)
+require(BiocManager)
+#BiocManager::install("decontam")
+require(decontam)
+require(ggpubr)
+
+# set directory
+setwd("/Users/anafonseca/Pig_vinny/fastp/forward_reads/output/")
+
+### ---- phyloseq ----
+# LOAD ASV table
+load("asv-table.RData")
+
+# load tax table 
+load("tax-table.RData")
+
+# matrices in R 
+dim(seqtab.nochim)
+dim(tax)
+
+# create phyloseq object 
+ps <- phyloseq(otu_table(t(seqtab.nochim), taxa_are_rows = TRUE),
+               tax_table(tax))
+
+# look at the phyloseq object 
+ps
+
+# get number of taxa
+ntaxa(ps)
+
+#get taxa ranks
+rank_names(ps)
+
+# access the data "slots" with @
+head(ps@tax_table)
+head(ps@otu_table)
+
+# fix ASV names 
+### from dada2 tutorial: fix ASV names
+dna <- Biostrings::DNAStringSet(taxa_names(ps))
+names(dna) <- taxa_names(ps)
+DNAps <- merge_phyloseq(ps, dna)
+taxa_names(DNAps) <- paste0("ASV", seq(ntaxa(DNAps)))
+DNAps
+
+# get taxa names 
+head(taxa_names(DNAps))
+head(sample_names(DNAps))
 
 
-#load post-error/filtering from ben-monotonicity.R 
-load(paste0(OUTPATH, "/error-learning.RData"))
+## ---- metadata ----
+# read in metadata file 
+dat <- readxl::read_xlsx(path = "/Users/anafonseca/Pig_vinny/metadata/Metadata.xlsx",
+                         sheet = 1)
 
-#dereplicate
-derepFs <- derepFastq(forward, verbose=TRUE)
-#derepRs <- derepFastq(reverse, verbose=TRUE)
+# look at data
+head(dat)
+str(dat)
 
-# save image
-save.image(file = paste0(OUTPATH, "/derep-image.RData"))
+# fix sample names to get ONLY the sample ID
+#names <- sapply(str_split(sample_names(ps), "_"), `[`, 1) # I had an error with telling me about duplicates 
+names <- str_remove_all(sample_names(ps), "_S(\\d){1,3}_r1_fastp.fq")
 
-#dada
-dadaForward <- dada(derepFs, 
-                    err=errF, 
-                    multithread=TRUE,
-                    verbose = TRUE)
-#dadaReverse <- dada(derepRs, 
-# err=errR,
-# multithread=TRUE,
-# verbose = TRUE)
-
-# print finished message
-cat("done!")
-
-# save image
-save.image(file = paste0(OUTPATH, "/derep-dada2.RData"))
-
-## finishing the dada2 pipeline
-# post -dada
-
-## --- CHANGE THESE VARIABLES ----
-
-# set working directory
-#OUTPATH <- "/Users/anafonseca/Pig_vinny/fastp/test/output"
-
-# load previous RData
-load(paste0(OUTPATH, "/derep-dada2.RData"))
-
-## path to reference database
-# downloaded from: https://benjjneb.github.io/dada2/training.html
-DB = "/Users/anafonseca/Pig_vinny/silva_data/silva_nr99_v138.1_train_set.fa.gz"
-
-### --- CODE ----
-
-require(dada2)
-
-# merge paired reads
-#mergers <- mergePairs(dadaF = dadaForward,
-#derepF = forward,
-#  dadaR = dadaReverse,
-# derepR = reverse,
-# verbose = TRUE)
+# figure out the duplicates 
+length(unique(names))
+#namedf <- data.frame(id = names)
+#namedf %>% group_by(id) %>% filter(n() > 1)
+#which(names == "280")
+#sample_names(ps)[194]
+#sample_names(ps)[195]
 
 
+# change sample names to NAMES
+sample_names(ps) <- names
 
-# save intermediate progress
-#save.image(paste0(OUTPATH, "/working-image.RData"))
+# format our data to add to phyloseq
+sampdf <- dat %>%
+  column_to_rownames(var = "Project_ID")
 
-# construct sequence table of ASVs
-seqtab <- makeSequenceTable(samples = dadaForward)
 
-# save intermediate progress
-save.image(paste0(OUTPATH, "/working-image.RData"))
+#row.names(dat) <-dat$Sample_ID
 
-# remove chimeras
-seqtab.nochim <- removeBimeraDenovo(unqs = seqtab, 
-                                    method = "consensus",
-                                    verbose = TRUE)
+#names <- rownames(seqtab.nochim) #we are making a list 
+#gsub("_.*","", names) # removing file extension
+#names <- gsub("_.*","", names)
+#rownames(seqtab.nochim) <- names
 
-# save intermediate progress
-save.image(paste0(OUTPATH, "/working-image.RData"))
+# add to phyloseq
+#ps <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows= FALSE),
+#              sample_data(sampdf), 
+#             tax_table(tax))
 
-# assign taxonomy using the Silva database
-tax <- assignTaxonomy(seqs = seqtab.nochim, 
-                      refFasta = DB, 
-                      verbose = TRUE)
+## build phyloseq
+sample_data(ps) <- sampdf
 
-# save intermediate progress
-save.image(paste0(OUTPATH, "/working-image.RData"))
+# did it work?
+#ps
 
-## This is the end of the dada2 algorithm
+#rownames(seqtab.nochim) %in% rownames(sample_data(ps))
+## save our output
+# re-name our phyloseq
 
-## ---- WRITE OUTPUT ----
+psraw <- ps
 
-# write ASV table to file
-write.table(seqtab.nochim, file = paste0(OUTPATH, "/asv-table.txt"), sep = "\t", row.names = FALSE)
+# save as Rimage
+save(psraw, file = "ps-raw.rds")
 
-# save ASB table as RData object
-save(seqtab.nochim, file = paste0(OUTPATH, "/asv-table.RData"))
+#Check bacillus presence
+psraw
 
-# write taxonomy table to file
-write.table(tax, file = paste0(OUTPATH, "/tax-table.txt"), sep = "\t", row.names = FALSE)
 
-# save tax table as RData object
-save(tax, file = paste0(OUTPATH, "/tax-table.RData"))
 
-# save all objects
-save.image(file = paste0(OUTPATH, "/all-dada-objects.RData"))
-
-## ---- track reads through the pipeline ----
-
-# define function (from dada2 tutorial)
-getN <- function(x) sum(getUniques(x))
-
-# create dataframe
-track <- cbind(sapply(dadaForward, getN), rowSums(seqtab.nochim))
-
-# change names
-colnames(track) <- c("denoisedF", "nonchim")
-rownames(track) <- fwdNames
-
-# write to file
-write.table(track, file = paste0(OUTPATH, "track-reads.txt"), sep = "\t") 
-
-# print finished message
-cat("done!")
 
